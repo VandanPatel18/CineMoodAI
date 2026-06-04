@@ -1,6 +1,6 @@
 import numpy as np
 from sklearn.preprocessing import normalize
-from ..utils.scoring import compute_final_score
+from utils.scoring import compute_final_score
 
 
 class Recommender:
