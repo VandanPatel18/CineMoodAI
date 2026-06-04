@@ -54,6 +54,21 @@ _LANGUAGE_PRIORITY = (
     "ko", "ja", "zh", "fr", "es", "de", "it", "pt", "ar", "ru", "id", "th", "vi", "tr", "fa", "ur",
 )
 
+_GENRE_PRIORITY = (
+    "Crime", "Thriller", "Horror", "Mystery", "Action", "Drama", "Comedy",
+    "Romance", "Science Fiction", "Fantasy", "Adventure", "War", "Animation",
+    "Sport", "Family", "Documentary", "Musical", "Western", "History",
+)
+
+VIBE_QUERY_HINTS = {
+    "Comforting": "comforting warm cozy heartwarming easy watch",
+    "Funny": "funny lighthearted comedy humor",
+    "Thought-provoking": "thought-provoking complex mind-bending deep",
+    "Emotional": "emotional moving touching heartfelt drama",
+    "Exciting": "exciting thrilling intense action suspense",
+    "Surprise me": "surprising unexpected twist unique",
+}
+
 
 def _read_movies_csv(path):
     return pd.read_csv(path, **_MOVIE_CSV_OPTS)
@@ -93,7 +108,29 @@ def extract_genre_options(df):
     if not genres and "genres" in df.columns:
         for raw in df["genres"].dropna():
             genres.update(parse_list_column(raw))
-    return sorted(genres)
+    unique = sorted(genres)
+    priority = {name: idx for idx, name in enumerate(_GENRE_PRIORITY)}
+    return sorted(unique, key=lambda g: (priority.get(g, len(_GENRE_PRIORITY)), g))
+
+
+def build_recommendation_query(user_text="", genres=None, vibes=None, language=None):
+    """Turn sidebar choices and optional chat text into one semantic search query."""
+    parts = []
+    text = (user_text or "").strip()
+    if text:
+        parts.append(text)
+    if genres:
+        parts.append(" ".join(genres) + " movies")
+    for vibe in vibes or []:
+        hint = VIBE_QUERY_HINTS.get(vibe)
+        if hint:
+            parts.append(hint)
+    if language and language != "Any":
+        label = language_label(language)
+        parts.append(f"{label} films")
+    if not parts:
+        return "highly rated popular movies across different moods"
+    return ". ".join(parts)
 
 
 def extract_language_options(df):

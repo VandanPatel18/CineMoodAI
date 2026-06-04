@@ -18,6 +18,7 @@ from cinemood_utils.preprocessing import (
     extract_genre_options,
     extract_language_options,
     language_label,
+    build_recommendation_query,
 )
 
 DATA_DIR = Path(ROOT) / "data"
@@ -260,7 +261,7 @@ def main():
     rec, ed, mem = init_models()
 
     with st.sidebar:
-        st.markdown("### Filters")
+        st.markdown("### Your preferences")
         max_runtime_opt = st.selectbox("Runtime", ["Any", "Under 90 min", "Under 2 hrs"], index=0)
         if max_runtime_opt == "Under 90 min":
             max_runtime = 90
@@ -270,7 +271,7 @@ def main():
             max_runtime = None
 
         all_genres = extract_genre_options(movies_df)
-        genres = st.multiselect("Genres", options=all_genres, default=[], placeholder="All genres")
+        genres = st.multiselect("Genres", options=all_genres, default=[], placeholder="Crime, Thriller, Drama…")
         languages = extract_language_options(movies_df)
         language_options = ["Any"] + languages
         lang = st.selectbox(
@@ -284,14 +285,53 @@ def main():
             "Vibe",
             options=["Comforting", "Funny", "Thought-provoking", "Emotional", "Exciting", "Surprise me"],
             default=[],
-            placeholder="Any vibe",
+            placeholder="Pick a mood",
         )
+
+        active = []
+        if genres:
+            active.append(", ".join(genres[:3]) + ("…" if len(genres) > 3 else ""))
+        if lang and lang != "Any":
+            active.append(language_label(lang))
+        if vibes:
+            active.append(", ".join(vibes))
+        if max_runtime:
+            active.append(max_runtime_opt)
+        if active:
+            st.markdown("**Matching:**")
+            for chip in active:
+                st.markdown(f"<span style='display:inline-block;margin:2px 4px 2px 0;padding:4px 10px;border-radius:999px;background:rgba(59,130,246,.2);color:#cbd5e1;font-size:0.82rem;'>{chip}</span>", unsafe_allow_html=True)
+
         st.markdown("---")
-        st.caption("**Quick prompts**")
-        st.caption("feel-good Hindi drama · Korean thriller · Tamil romance")
+        filter_submit = st.button("🎯 Recommend from sidebar", use_container_width=True, type="primary")
+        st.caption("Uses your genre, language, vibe & rating picks — no typing required.")
 
     if "history" not in st.session_state:
         st.session_state.history = []
+
+    def run_recommendations(user_text="", source="chat"):
+        query = build_recommendation_query(user_text, genres=genres, vibes=vibes, language=lang)
+        filters = {"min_rating": min_rating, "vibe": vibes}
+        if max_runtime:
+            filters["max_runtime"] = max_runtime
+        if genres:
+            filters["genres"] = genres
+        if lang and lang != "Any":
+            filters["language"] = lang
+
+        label = user_text.strip() if user_text.strip() else f"Sidebar picks: {query[:120]}"
+        st.session_state.history.append({"user": label, "source": source})
+
+        with st.spinner("Finding films that match your demand…"):
+            try:
+                recommendations = rec.recommend(query, top_k=12, filters=filters)
+            except Exception as exc:
+                st.error(f"Something went wrong while scoring movies: {exc}")
+                recommendations = []
+
+        if not recommendations:
+            st.warning("No matches for these filters — try fewer genres or lower the rating.")
+        st.session_state.history.append({"assistant": recommendations})
 
     st.markdown("<div class='chat-panel'>", unsafe_allow_html=True)
     with st.form("chat", clear_on_submit=False):
@@ -305,26 +345,11 @@ def main():
         submitted = st.form_submit_button("✨ Get recommendations", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    if submitted and user_text.strip():
-        st.session_state.history.append({"user": user_text.strip()})
-        filters = {"min_rating": min_rating, "vibe": vibes}
-        if max_runtime:
-            filters["max_runtime"] = max_runtime
-        if genres:
-            filters["genres"] = genres
-        if lang and lang != "Any":
-            filters["language"] = lang
+    if filter_submit:
+        run_recommendations(source="sidebar")
 
-        with st.spinner("Reading your mood and ranking films…"):
-            try:
-                recommendations = rec.recommend(user_text.strip(), top_k=12, filters=filters)
-            except Exception as exc:
-                st.error(f"Something went wrong while scoring movies: {exc}")
-                recommendations = []
-
-        if not recommendations:
-            st.warning("No strong matches — try a broader description or fewer filters.")
-        st.session_state.history.append({"assistant": recommendations})
+    if submitted:
+        run_recommendations(user_text, source="chat")
 
     if st.session_state.history:
         last = st.session_state.history[-1]

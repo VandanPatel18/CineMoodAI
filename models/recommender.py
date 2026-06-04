@@ -1,5 +1,6 @@
 import ast
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import normalize
 from cinemood_utils.scoring import compute_final_score
 
@@ -16,6 +17,16 @@ def _safe_float(value, default=0.0):
         return default
 
 
+VIBE_TO_MOOD = {
+    "Comforting": "comforting",
+    "Funny": "funny",
+    "Thought-provoking": "mind-bending",
+    "Emotional": "emotional",
+    "Exciting": "thrilling",
+    "Surprise me": "mind-bending",
+}
+
+
 class Recommender:
     def __init__(self, semantic_model, emotion_detector, movies_df, memory):
         self.semantic_model = semantic_model
@@ -29,77 +40,126 @@ class Recommender:
         tags = self.emotion_detector.infer(text, top_k=top_k)
         return tags
 
+    def _passes_filters(self, row, genres_list, filters):
+        if filters.get("genres"):
+            if not any(g in filters["genres"] for g in genres_list):
+                return False
+        if filters.get("language"):
+            if str(self._cell(row, "original_language", "")) != str(filters.get("language")):
+                return False
+        if filters.get("min_rating"):
+            if _safe_float(self._cell(row, "vote_average")) < float(filters.get("min_rating")):
+                return False
+        if filters.get("max_runtime"):
+            rt = _safe_float(self._cell(row, "runtime"))
+            if rt and rt > filters["max_runtime"]:
+                return False
+        return True
+
+    def _cell(self, row, key, default=None):
+        value = row.get(key, default)
+        if isinstance(value, pd.Series):
+            value = value.iloc[0]
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return default
+        return value
+
+    def _normalize_genres(self, row):
+        genres_list = self._cell(row, "genres_list", [])
+        if isinstance(genres_list, str):
+            try:
+                genres_list = ast.literal_eval(genres_list)
+            except Exception:
+                genres_list = []
+        return genres_list if isinstance(genres_list, list) else []
+
+    def _vibe_boost(self, movie_tags, filters):
+        requested = filters.get("vibe") or []
+        if not requested or "Surprise me" in requested:
+            return 0.0
+        wanted = {VIBE_TO_MOOD.get(v, v.lower()) for v in requested}
+        boost = 0.0
+        for tag in movie_tags:
+            if tag.get("tag") in wanted:
+                boost += float(tag.get("score", 0.0))
+        return boost / max(len(wanted), 1)
+
     def recommend(self, user_text, top_k=20, filters=None):
         filters = filters or {}
-        # semantic candidates
-        sem_results = self.semantic_model.semantic_search(user_text, top_k=top_k * 6)
+        mem = self.memory.get()
+        sem_results = self.semantic_model.semantic_search(user_text, top_k=top_k * 8)
+        seen = set()
         candidates = []
-        for idx, sem_score in sem_results:
+
+        def score_row(idx, sem_score):
             try:
                 row = self.movies.loc[idx]
             except Exception:
-                continue
-            # skip disliked genres from memory
-            mem = self.memory.get()
-            genres_list = row.get("genres_list") or []
-            if isinstance(genres_list, str):
-                try:
-                    genres_list = ast.literal_eval(genres_list)
-                except Exception:
-                    genres_list = []
+                return None
+            genres_list = self._normalize_genres(row)
             if any(g in mem.get("disliked_genres", []) for g in genres_list):
-                continue
-            # apply user filters early
-            if filters.get("genres"):
-                if not any(g in filters.get("genres", []) for g in genres_list):
-                    continue
-            if filters.get("language"):
-                if str(row.get("original_language")) != str(filters.get("language")):
-                    continue
-            if filters.get("min_rating"):
-                try:
-                    if float(row.get("vote_average") or 0) < float(filters.get("min_rating")):
-                        continue
-                except Exception:
-                    pass
-            # emotional fit: compare movie tags vs user inferred tags
+                return None
+            if not self._passes_filters(row, genres_list, filters):
+                return None
+
             movie_tags = self._movie_emotional_profile(idx, top_k=5)
             user_tags = self.emotion_detector.infer(user_text, top_k=5)
-            # emotional fit: overlap between user tags and movie tags weighted by scores
             user_tag_names = {t["tag"]: t["score"] for t in user_tags}
             emotional_fit = 0.0
             for mt in movie_tags:
                 emotional_fit += user_tag_names.get(mt.get("tag"), 0.0) * float(mt.get("score", 0.0))
-            # normalize emotional fit to [0,1]
             if movie_tags:
-                emotional_fit = emotional_fit / (len(movie_tags) or 1)
-            # preference match: genres, language, runtime
-            pref_score = 0.0
-            pref = self.memory.get()
-            liked = pref.get("liked_genres", [])
-            if liked and any(g in liked for g in row.get("genres_list", [])):
-                pref_score += 1.0
-            if row.get("original_language") in pref.get("preferred_languages", []):
-                pref_score += 0.5
+                emotional_fit = emotional_fit / len(movie_tags)
+            emotional_fit += self._vibe_boost(movie_tags, filters)
 
-            # runtime suitability: check filters or memory
+            pref_score = 0.0
+            liked = mem.get("liked_genres", [])
+            if liked and any(g in liked for g in genres_list):
+                pref_score += 1.0
+            if self._cell(row, "original_language") in mem.get("preferred_languages", []):
+                pref_score += 0.5
+            if filters.get("genres") and any(g in filters["genres"] for g in genres_list):
+                pref_score += 0.75
+
             runtime_score = 0.0
-            rt = _safe_float(row.get("runtime"))
+            rt = _safe_float(self._cell(row, "runtime"))
             if filters.get("max_runtime") and rt and rt <= filters["max_runtime"]:
                 runtime_score = 1.0
             elif not filters.get("max_runtime"):
                 runtime_score = 0.5
+            elif filters.get("max_runtime") and not rt:
+                runtime_score = 0.35
 
-            popularity = _safe_float(row.get("popularity"))
-            rating = _safe_float(row.get("vote_average"))
+            popularity = _safe_float(self._cell(row, "popularity"))
+            rating = _safe_float(self._cell(row, "vote_average"))
+            final = compute_final_score(
+                semantic=sem_score,
+                emotional=emotional_fit,
+                preference=pref_score,
+                runtime=runtime_score,
+                popularity=popularity,
+                rating=rating,
+            )
+            explanation = self._explain(row, user_text, movie_tags, filters)
+            return {"movie_idx": idx, "score": final, "explanation": explanation, "row": row}
 
-            final = compute_final_score(semantic=sem_score, emotional=emotional_fit, preference=pref_score, runtime=runtime_score, popularity=popularity, rating=rating)
+        for idx, sem_score in sem_results:
+            seen.add(idx)
+            item = score_row(idx, sem_score)
+            if item:
+                candidates.append(item)
 
-            explanation = self._explain(row, user_text, movie_tags)
+        # If sidebar filters are strict, fill from the full catalog that matches demand.
+        if len(candidates) < top_k and any(filters.get(k) for k in ("genres", "language", "max_runtime", "vibe")):
+            for idx in self.movies.index:
+                if idx in seen:
+                    continue
+                item = score_row(idx, 0.35)
+                if item:
+                    candidates.append(item)
+                if len(candidates) >= top_k * 4:
+                    break
 
-            candidates.append({"movie_idx": idx, "score": final, "explanation": explanation, "row": row})
-
-        # sort and diversify: pick top by score but avoid same genre repeats
         candidates = sorted(candidates, key=lambda x: -x["score"])[:top_k * 3]
         selected = []
         genres_seen = set()
@@ -119,15 +179,24 @@ class Recommender:
 
         return selected
 
-    def _explain(self, row, user_text, movie_tags):
+    def _explain(self, row, user_text, movie_tags, filters=None):
+        filters = filters or {}
         reasons = []
-        # example heuristic-based explanation
-        reasons.append(f"Semantic match to your description")
+        genres = self._normalize_genres(row)
+        if filters.get("genres") and any(g in filters["genres"] for g in genres):
+            matched = [g for g in genres if g in filters["genres"]]
+            reasons.append(f"Matches your genre pick: {', '.join(matched[:2])}")
+        else:
+            reasons.append("Semantic match to your description")
+        if filters.get("language"):
+            reasons.append(f"Language: {str(self._cell(row, 'original_language', '')).upper()}")
         if movie_tags:
             tag_list = ", ".join([t["tag"] for t in movie_tags[:3]])
-            reasons.append(f"Emotional profile: {tag_list}")
-        if row.get("vote_average"):
-            reasons.append(f"Strong rating: {row.get('vote_average')}")
-        if row.get("runtime"):
-            reasons.append(f"Runtime: {int(row.get('runtime'))} min")
+            reasons.append(f"Mood: {tag_list}")
+        vote = self._cell(row, "vote_average")
+        if vote is not None:
+            reasons.append(f"Rating: {float(vote):.1f}")
+        runtime = self._cell(row, "runtime")
+        if runtime:
+            reasons.append(f"Runtime: {int(float(runtime))} min")
         return "; ".join(reasons)
