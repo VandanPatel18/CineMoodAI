@@ -6,10 +6,14 @@ import ast
 def load_and_merge(tmdb_movies_path, tmdb_credits_path):
     movies = pd.read_csv(tmdb_movies_path)
     credits = pd.read_csv(tmdb_credits_path)
-    # merge on title/Id: credits has movie_id and title
-    # credits file uses movie_id; align to movies 'id'
+    # merge on id; credits file may use movie_id instead
     if "movie_id" in credits.columns:
         credits = credits.rename(columns={"movie_id": "id"})
+    if "id" not in credits.columns:
+        raise ValueError("Credits file must contain 'id' or 'movie_id' column")
+    # normalize IDs to string for robust merge
+    movies["id"] = movies["id"].astype(str)
+    credits["id"] = credits["id"].astype(str)
     merged = movies.merge(credits, on="id", how="left", suffixes=("", "_credits"))
     # parse genres and keywords if stored as stringified lists
     def parse_list_column(x):
