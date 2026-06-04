@@ -2,7 +2,7 @@
 
 <p align="center">
 
-<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=32&duration=3000&pause=1200&color=36F7D7&center=true&vCenter=true&width=900&lines=Semantic+Mood-Based+Movie+Recommendation+System; Conversational+AI+for+Personalized+Entertainment;Explainable+AI+Movie+Recommendations" />
+<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=32&duration=3000&pause=1200&color=36F7D7&center=true&vCenter=true&width=900&lines=Semantic+Mood-Based+Movie+Recommendation+System;Explainable+AI+Movie+Recommendations" />
 
 </p>
 
