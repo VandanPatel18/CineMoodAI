@@ -16,6 +16,73 @@ from models.conversation_memory import ConversationMemory
 from utils.preprocessing import load_and_merge
 
 
+PAGE_STYLE = """
+<style>
+body {
+    background: #060b12;
+    color: #e8f1ff;
+}
+.reportview-container .main {
+    background-color: #060b12;
+}
+.css-1d391kg {
+    background-color: #060b12;
+}
+.stApp {
+    background: #060b12;
+}
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
+}
+.css-1d391kg {
+    background-color: #060b12;
+}
+.stButton>button {
+    background-color: #ff4b4b;
+    color: white;
+    border: none;
+}
+.stButton>button:hover {
+    background-color: #e43f3f;
+}
+.stTextInput>div>div>input, .stTextArea>div>div>textarea {
+    background-color: #0b1220;
+    color: #e8f1ff;
+    border: 1px solid #1f2937;
+}
+.stSlider>div>div>div>div {
+    background: #1f2937;
+}
+.app-card {
+    background: #0b1220;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.22);
+    margin-bottom: 18px;
+}
+.app-card h4 {
+    color: #ffffff;
+}
+.app-card .meta {
+    color: #94a3b8;
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+}
+.app-card .badge {
+    display: inline-block;
+    margin-right: 8px;
+    margin-bottom: 8px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.08);
+    color: #cbd5e1;
+    font-size: 0.8rem;
+}
+</style>
+"""
+
+
 @st.cache_resource
 def load_movies():
     base = Path.cwd()
@@ -30,7 +97,6 @@ def init_models():
     sem = SemanticModel()
     movies = load_movies()
     sem.build_movie_embeddings(movies)
-    emb = sem
     ed = EmotionDetector(sem)
     mem = ConversationMemory()
     rec = Recommender(sem, ed, movies, mem)
@@ -43,51 +109,81 @@ def poster_url(path):
     return f"https://image.tmdb.org/t/p/w300{path}"
 
 
+def build_recommendation_card(movie, explanation, score):
+    poster = poster_url(movie.get("poster_path"))
+    title = movie.get("title", "Untitled")
+    rating = movie.get("vote_average", "N/A")
+    runtime = int(movie.get("runtime") or 0)
+    genres = ", ".join(movie.get("genres_list", [])[:3])
+    details = []
+    if rating != "N/A":
+        details.append(f"⭐ {rating}")
+    if runtime:
+        details.append(f"⏱ {runtime} min")
+    if genres:
+        details.append(f"🎭 {genres}")
+
+    detail_line = " · ".join(details)
+
+    card = f"""
+    <div class='app-card'>
+        <div style='display:flex; gap:16px;'>
+            {f"<img src='{poster}' style='width:120px; border-radius:14px;'/>" if poster else ""}
+            <div style='flex:1;'>
+                <h4>{title}</h4>
+                <div class='meta'>{detail_line}</div>
+                <div style='color:#d1d5db; line-height:1.6; margin-bottom:12px;'>{explanation}</div>
+                <div class='badge'>Score {score:.2f}</div>
+            </div>
+        </div>
+    </div>
+    """
+    return card
+
+
 def main():
-    st.set_page_config(page_title="CineMood AI", layout="wide", initial_sidebar_state="collapsed")
-    # basic dark-themed CSS
-    st.markdown(
-        "<style>body{background-color:#0b0f14;color:#e6eef6} .stApp { background-color:#0b0f14} .css-1d391kg{background-color:#0b0f14}</style>",
-        unsafe_allow_html=True,
-    )
+    st.set_page_config(page_title="CineMood AI", layout="wide", initial_sidebar_state="expanded")
+    st.markdown(PAGE_STYLE, unsafe_allow_html=True)
+
     st.markdown("# 🎬 CineMood AI")
-    st.markdown("Talk to me about your day — I will pick the perfect movie mood.")
+    st.markdown("## Conversational mood-based movie recommendations with semantic understanding")
 
-    # Sidebar filters
     movies_df = load_movies()
-    st.sidebar.header("Filters")
-    max_runtime_opt = st.sidebar.selectbox("Runtime", ["Any", "Under 90 min", "Under 2 hrs"], index=0)
-    if max_runtime_opt == "Under 90 min":
-        max_runtime = 90
-    elif max_runtime_opt == "Under 2 hrs":
-        max_runtime = 120
-    else:
-        max_runtime = None
-
-    all_genres = sorted({g for lst in movies_df.get("genres_list", []) for g in lst})
-    genres = st.sidebar.multiselect("Genre", options=all_genres, default=[])
-    languages = sorted(movies_df["original_language"].dropna().unique().tolist())
-    lang = st.sidebar.selectbox("Language", ["Any"] + languages, index=0)
-    min_rating = st.sidebar.slider("Min rating", 0.0, 10.0, 6.0, 0.1)
-    vibe = st.sidebar.multiselect("Vibe (optional)", options=["Comforting", "Funny", "Thought-provoking", "Emotional", "Exciting", "Surprise me"], default=[])
-
     rec, ed, mem = init_models()
+
+    with st.sidebar:
+        st.subheader("Refine your watchlist")
+        max_runtime_opt = st.selectbox("Runtime", ["Any", "Under 90 min", "Under 2 hrs"], index=0)
+        if max_runtime_opt == "Under 90 min":
+            max_runtime = 90
+        elif max_runtime_opt == "Under 2 hrs":
+            max_runtime = 120
+        else:
+            max_runtime = None
+
+        all_genres = sorted({g for lst in movies_df.get("genres_list", []) for g in lst})
+        genres = st.multiselect("Genres", options=all_genres, default=[])
+        languages = sorted(movies_df["original_language"].dropna().unique().tolist())
+        lang = st.selectbox("Language", ["Any"] + languages, index=0)
+        min_rating = st.slider("Minimum rating", 0.0, 10.0, 6.0, 0.1)
+        vibes = st.multiselect("Vibe", options=["Comforting", "Funny", "Thought-provoking", "Emotional", "Exciting", "Surprise me"], default=[])
+        st.markdown("---")
+        st.markdown("#### Deployment-ready details")
+        st.markdown("- No API key is required for this app.\n- Data is loaded from the repo files directly.\n- If needed, the app will use the sample dataset on deploy.")
 
     if "history" not in st.session_state:
         st.session_state.history = []
 
     with st.form("chat"):
-        user_text = st.text_area("Your message", height=100, placeholder="Tell me how your day went...")
-        submitted = st.form_submit_button("Send")
+        st.markdown("### Tell me about your day")
+        user_text = st.text_area("Type naturally — for example, 'I want something relaxing but not boring.'", height=140)
+        submitted = st.form_submit_button("Generate recommendations")
 
     if submitted and user_text:
         st.session_state.history.append({"user": user_text})
-        # infer emotions and update memory heuristically
-        infer = ed.infer(user_text, top_k=3)
-        # simple dislike detection
         if "hate" in user_text.lower():
-            # placeholder; real parsing would extract actual genre names
             mem.update_from_inference({"disliked_genres": []})
+
         filters = {}
         if max_runtime:
             filters["max_runtime"] = max_runtime
@@ -96,27 +192,37 @@ def main():
         if lang and lang != "Any":
             filters["language"] = lang
         filters["min_rating"] = min_rating
+        filters["vibe"] = vibes
 
-        with st.spinner("Finding the best matches for your mood..."):
+        with st.spinner("Analyzing mood and scoring movies..."):
             recommendations = rec.recommend(user_text, top_k=12, filters=filters)
         st.session_state.history.append({"assistant": recommendations})
 
-    # display recommendations if available
+    canvas = st.container()
+    canvas.markdown("---")
     if st.session_state.history:
         last = st.session_state.history[-1]
         if "assistant" in last:
             recs = last["assistant"]
-            cols = st.columns(3)
-            for i, r in enumerate(recs):
-                col = cols[i % len(cols)]
-                row = r["row"]
-                title = row.get("title")
-                poster = poster_url(row.get("poster_path"))
-            with col:
-                if poster:
-                    st.image(poster, width=200)
-                st.markdown(f"**{title}**")
-                st.markdown(f"⭐ {row.get('vote_average', 'N/A')}  • ⏱ {int(row.get('runtime') or 0)} min")
-                st.markdown(f"Genres: {', '.join(row.get('genres_list', [])[:3])}")
+            st.markdown("## Recommended movies")
+            card_columns = st.columns(3)
+            for idx, item in enumerate(recs):
+                col = card_columns[idx % 3]
+                with col:
+                    st.markdown(build_recommendation_card(item["row"], item["explanation"], item["score"]), unsafe_allow_html=True)
+    else:
+        st.markdown("### Ready when you are")
+        st.markdown("Tell me how you're feeling or what kind of story you want, and I'll recommend mood-matched movies.")
+
+    if st.session_state.history:
+        chat_expander = st.expander("Conversation history")
+        with chat_expander:
+            for entry in st.session_state.history:
+                if "user" in entry:
+                    st.markdown(f"**You:** {entry['user']}")
+                if "assistant" in entry:
+                    st.markdown(f"**Recommendations returned:** {len(entry['assistant'])} movies")
+
+
 if __name__ == '__main__':
     main()

@@ -126,17 +126,7 @@ Example:
 
 ## 📺 OTT Platform Integration
 
-CineMood AI recommends only movies users can actually watch.
-
-Supported platforms:
-
-* Netflix
-* Amazon Prime Video
-* Disney+ Hotstar
-* JioCinema
-* Sony LIV
-* Apple TV+
-* Zee5
+This deployment does not require an external API key. OTT availability is shown as a design placeholder and can be connected later with a streaming availability API if desired.
 
 ---
 
@@ -287,6 +277,8 @@ Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
+
+> No external API key is required. The app loads data directly from the repository files.
 
 ---
 
