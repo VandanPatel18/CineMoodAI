@@ -1,7 +1,7 @@
 import ast
 import numpy as np
 from sklearn.preprocessing import normalize
-from utils.scoring import compute_final_score
+from cinemood_utils.scoring import compute_final_score
 
 
 def _safe_float(value, default=0.0):

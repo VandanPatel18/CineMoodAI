@@ -228,7 +228,7 @@ CineMoodAI/
 │   ├── recommender.py
 │   ├── conversation_memory.py
 │
-│── utils/
+│── cinemood_utils/
 │   ├── preprocessing.py
 │   ├── scoring.py
 │
