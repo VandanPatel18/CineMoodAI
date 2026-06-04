@@ -26,6 +26,12 @@ _LANGUAGE_LABELS = {
     "ja": "Japanese",
     "ta": "Tamil",
     "te": "Telugu",
+    "ml": "Malayalam",
+    "kn": "Kannada",
+    "mr": "Marathi",
+    "bn": "Bengali",
+    "pa": "Punjabi",
+    "gu": "Gujarati",
     "fr": "French",
     "es": "Spanish",
     "de": "German",
@@ -34,10 +40,19 @@ _LANGUAGE_LABELS = {
     "pt": "Portuguese",
     "ru": "Russian",
     "ar": "Arabic",
-    "ml": "Malayalam",
-    "bn": "Bengali",
-    "mr": "Marathi",
+    "id": "Indonesian",
+    "th": "Thai",
+    "vi": "Vietnamese",
+    "tr": "Turkish",
+    "fa": "Persian",
+    "ur": "Urdu",
 }
+
+# Popular languages shown first in filters when present in the dataset.
+_LANGUAGE_PRIORITY = (
+    "en", "hi", "ta", "te", "ml", "kn", "mr", "bn", "pa", "gu",
+    "ko", "ja", "zh", "fr", "es", "de", "it", "pt", "ar", "ru", "id", "th", "vi", "tr", "fa", "ur",
+)
 
 
 def _read_movies_csv(path):
@@ -96,7 +111,9 @@ def extract_language_options(df):
             pass
         if len(code) <= 5 and code.replace("-", "").isalpha():
             codes.append(code)
-    return sorted(set(codes))
+    unique = sorted(set(codes))
+    priority = {code: idx for idx, code in enumerate(_LANGUAGE_PRIORITY)}
+    return sorted(unique, key=lambda c: (priority.get(c, len(_LANGUAGE_PRIORITY)), c))
 
 
 def language_label(code):

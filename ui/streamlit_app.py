@@ -288,7 +288,7 @@ def main():
         )
         st.markdown("---")
         st.caption("**Quick prompts**")
-        st.caption("feel-good drama · dark sci-fi · light comedy")
+        st.caption("feel-good Hindi drama · Korean thriller · Tamil romance")
 
     if "history" not in st.session_state:
         st.session_state.history = []
