@@ -1,6 +1,19 @@
+import ast
 import numpy as np
 from sklearn.preprocessing import normalize
 from utils.scoring import compute_final_score
+
+
+def _safe_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str):
+            cleaned = value.strip().replace(",", "")
+            return float(cleaned) if cleaned else default
+        return float(value)
+    except Exception:
+        return default
 
 
 class Recommender:
@@ -28,14 +41,20 @@ class Recommender:
                 continue
             # skip disliked genres from memory
             mem = self.memory.get()
-            if any(g in mem.get("disliked_genres", []) for g in (row.get("genres_list") or [])):
+            genres_list = row.get("genres_list") or []
+            if isinstance(genres_list, str):
+                try:
+                    genres_list = ast.literal_eval(genres_list)
+                except Exception:
+                    genres_list = []
+            if any(g in mem.get("disliked_genres", []) for g in genres_list):
                 continue
             # apply user filters early
             if filters.get("genres"):
-                if not any(g in filters.get("genres", []) for g in (row.get("genres_list") or [])):
+                if not any(g in filters.get("genres", []) for g in genres_list):
                     continue
             if filters.get("language"):
-                if row.get("original_language") != filters.get("language"):
+                if str(row.get("original_language")) != str(filters.get("language")):
                     continue
             if filters.get("min_rating"):
                 try:
@@ -65,14 +84,14 @@ class Recommender:
 
             # runtime suitability: check filters or memory
             runtime_score = 0.0
-            rt = row.get("runtime") or 0
+            rt = _safe_float(row.get("runtime"))
             if filters.get("max_runtime") and rt and rt <= filters["max_runtime"]:
                 runtime_score = 1.0
             elif not filters.get("max_runtime"):
                 runtime_score = 0.5
 
-            popularity = float(row.get("popularity") or 0)
-            rating = float(row.get("vote_average") or 0)
+            popularity = _safe_float(row.get("popularity"))
+            rating = _safe_float(row.get("vote_average"))
 
             final = compute_final_score(semantic=sem_score, emotional=emotional_fit, preference=pref_score, runtime=runtime_score, popularity=popularity, rating=rating)
 

@@ -16,12 +16,15 @@ class SemanticModel:
         self.movie_ids = None
 
     def build_movie_embeddings(self, movies_df, text_column="semantic_text", force=False):
+        expected_ids = movies_df.index.tolist()
         if os.path.exists(self.cache_path) and not force:
             try:
                 d = np.load(self.cache_path, allow_pickle=True)
-                self.movie_embeddings = d["embeddings"]
-                self.movie_ids = d["ids"].tolist()
-                return
+                cached_ids = d["ids"].tolist()
+                if len(cached_ids) == len(expected_ids) and cached_ids == expected_ids:
+                    self.movie_embeddings = d["embeddings"]
+                    self.movie_ids = cached_ids
+                    return
             except Exception:
                 pass
 
